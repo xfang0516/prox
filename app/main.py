@@ -16,7 +16,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-WEBHOOK_PATH = "/dcs/corporateVA/webhooks"
+WEBHOOK_PATH = "/api/dcs/corporateVA/webhooks"
 
 HOP_BY_HOP_HEADERS = {
     "connection",

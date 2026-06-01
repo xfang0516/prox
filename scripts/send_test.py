@@ -5,7 +5,7 @@ import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:8080"
-WEBHOOK = f"{BASE}/dcs/corporateVA/webhooks"
+WEBHOOK = f"{BASE}/api/dcs/corporateVA/webhooks"
 
 
 def main() -> int:

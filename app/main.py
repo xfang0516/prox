@@ -16,8 +16,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-WEBHOOK_PATH = "/api/dcs/corporateVA/webhooks"
-
 HOP_BY_HOP_HEADERS = {
     "connection",
     "keep-alive",
@@ -34,12 +32,16 @@ HOP_BY_HOP_HEADERS = {
 app = FastAPI(title="Webhook Forwarder", version="1.0.0")
 
 
-def get_forward_urls() -> list[str]:
+def get_forward_bases() -> list[str]:
     urls = [
         os.getenv("FORWARD_URL_1", "").strip(),
         os.getenv("FORWARD_URL_2", "").strip(),
     ]
-    return [url for url in urls if url]
+    return [url.rstrip("/") for url in urls if url]
+
+
+def build_forward_urls(path: str) -> list[str]:
+    return [f"{base}{path}" for base in get_forward_bases()]
 
 
 def build_forward_headers(request: Request) -> dict[str, str]:
@@ -83,9 +85,16 @@ async def forward_to_target(
         }
 
 
-@app.api_route(WEBHOOK_PATH, methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+@app.api_route(
+    "/api/dcs/corporateVA/webhooks",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+)
+@app.api_route(
+    "/dcs/safeheron/webhook/transaction",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+)
 async def receive_webhook(request: Request) -> Response:
-    forward_urls = get_forward_urls()
+    forward_urls = build_forward_urls(request.url.path)
     if len(forward_urls) < 2:
         return JSONResponse(
             status_code=500,

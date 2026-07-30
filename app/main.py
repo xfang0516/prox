@@ -99,7 +99,7 @@ async def forward_to_target(
     methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
 )
 @app.api_route(
-    "/dcs/safeheron/webhook/transaction",
+    "/api/dcs/safeheron/webhook/transaction",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
 )
 async def receive_webhook(request: Request) -> Response:

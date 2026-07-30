@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from dotenv import load_dotenv
@@ -32,12 +33,20 @@ HOP_BY_HOP_HEADERS = {
 app = FastAPI(title="Webhook Forwarder", version="1.0.0")
 
 
+def normalize_forward_base(url: str) -> str:
+    """只保留 scheme://host[:port]，忽略配置里多余的路径。"""
+    parts = urlsplit(url.strip())
+    if not parts.scheme or not parts.netloc:
+        return url.strip().rstrip("/")
+    return urlunsplit((parts.scheme, parts.netloc, "", "", ""))
+
+
 def get_forward_bases() -> list[str]:
     urls = [
         os.getenv("FORWARD_URL_1", "").strip(),
         os.getenv("FORWARD_URL_2", "").strip(),
     ]
-    return [url.rstrip("/") for url in urls if url]
+    return [normalize_forward_base(url) for url in urls if url]
 
 
 def build_forward_urls(path: str) -> list[str]:

@@ -17,6 +17,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+WEBHOOK_PATHS = [
+    "/api/dcs/corporateVA/webhooks",
+    "/api/dcs/safeheron/webhook/transaction",
+]
+
 HOP_BY_HOP_HEADERS = {
     "connection",
     "keep-alive",
@@ -33,24 +38,31 @@ HOP_BY_HOP_HEADERS = {
 app = FastAPI(title="Webhook Forwarder", version="1.0.0")
 
 
-def normalize_forward_base(url: str) -> str:
-    """只保留 scheme://host[:port]，忽略配置里多余的路径。"""
+def extract_origin(url: str) -> str:
+    """从配置中提取 scheme://host[:port]，丢弃路径/查询参数。"""
     parts = urlsplit(url.strip())
     if not parts.scheme or not parts.netloc:
-        return url.strip().rstrip("/")
+        raise ValueError(f"invalid FORWARD_URL: {url!r}")
     return urlunsplit((parts.scheme, parts.netloc, "", "", ""))
 
 
-def get_forward_bases() -> list[str]:
-    urls = [
+def get_forward_origins() -> list[str]:
+    raw_urls = [
         os.getenv("FORWARD_URL_1", "").strip(),
         os.getenv("FORWARD_URL_2", "").strip(),
     ]
-    return [normalize_forward_base(url) for url in urls if url]
+    origins: list[str] = []
+    for raw in raw_urls:
+        if not raw:
+            continue
+        origins.append(extract_origin(raw))
+    return origins
 
 
-def build_forward_urls(path: str) -> list[str]:
-    return [f"{base}{path}" for base in get_forward_bases()]
+def build_forward_urls(request_path: str) -> list[str]:
+    """目标地址 = 配置主机源 + 当前请求路径。"""
+    path = request_path if request_path.startswith("/") else f"/{request_path}"
+    return [f"{origin}{path}" for origin in get_forward_origins()]
 
 
 def build_forward_headers(request: Request) -> dict[str, str]:
@@ -79,9 +91,10 @@ async def forward_to_target(
             content=content,
             params=query_params,
         )
+        ok = 200 <= response.status_code < 300
         return {
             "url": target_url,
-            "success": True,
+            "success": ok,
             "status_code": response.status_code,
             "response_body": response.text[:2000],
         }
@@ -94,16 +107,16 @@ async def forward_to_target(
         }
 
 
-@app.api_route(
-    "/api/dcs/corporateVA/webhooks",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-)
-@app.api_route(
-    "/api/dcs/safeheron/webhook/transaction",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-)
 async def receive_webhook(request: Request) -> Response:
-    forward_urls = build_forward_urls(request.url.path)
+    request_path = request.url.path
+    try:
+        forward_urls = build_forward_urls(request_path)
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": str(exc)},
+        )
+
     if len(forward_urls) < 2:
         return JSONResponse(
             status_code=500,
@@ -121,12 +134,13 @@ async def receive_webhook(request: Request) -> Response:
     logger.info(
         "Received %s %s, body=%d bytes, forwarding to %s",
         request.method,
-        request.url.path,
+        request_path,
         len(body),
         forward_urls,
     )
 
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    # Webhook 不应跟随重定向，避免 POST 被转到首页导致 405
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
         results = await asyncio.gather(
             *[
                 forward_to_target(
@@ -150,13 +164,21 @@ async def receive_webhook(request: Request) -> Response:
             "success": all_success,
             "received": {
                 "method": request.method,
-                "path": str(request.url.path),
+                "path": request_path,
                 "query_params": dict(request.query_params),
                 "headers": dict(request.headers),
                 "body_length": len(body),
             },
             "forwards": results,
         },
+    )
+
+
+for _path in WEBHOOK_PATHS:
+    app.add_api_route(
+        _path,
+        receive_webhook,
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     )
 
 
